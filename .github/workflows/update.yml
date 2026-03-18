@@ -1,0 +1,99 @@
+name: Update Roblox Version Hash
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Save old versions
+        id: old
+        run: |
+          get_version () {
+            if [ -f "$1" ]; then
+              jq -r '.version' "$1" 2>/dev/null || echo "none"
+            else
+              echo "none"
+            fi
+          }
+
+          echo "WindowsPlayer=$(get_version WindowsPlayer.json)" >> $GITHUB_OUTPUT
+          echo "WindowsStudio64=$(get_version WindowsStudio64.json)" >> $GITHUB_OUTPUT
+          echo "MacPlayer=$(get_version MacPlayer.json)" >> $GITHUB_OUTPUT
+          echo "MacStudio=$(get_version MacStudio.json)" >> $GITHUB_OUTPUT
+
+      - name: Fetch latest versions
+        run: |
+          curl -s https://clientsettings.roblox.com/v2/client-version/WindowsPlayer > WindowsPlayer.json
+          curl -s https://clientsettings.roblox.com/v2/client-version/WindowsStudio64 > WindowsStudio64.json
+          curl -s https://clientsettings.roblox.com/v2/client-version/MacPlayer > MacPlayer.json
+          curl -s https://clientsettings.roblox.com/v2/client-version/MacStudio > MacStudio.json
+
+      - name: Detect changes + build message
+        id: msg
+        run: |
+          build_msg=""
+          changed_urls=""
+
+          check () {
+            name=$1
+            file=$2
+            old=$3
+            url=$4
+
+            new=$(jq -r '.version' "$file")
+
+            if [ "$old" != "$new" ]; then
+              if [ -n "$build_msg" ]; then
+                build_msg+=", "
+              fi
+              build_msg+="$name → $new"
+
+              # track changed URL
+              changed_urls+="$url "
+            fi
+          }
+
+          check "WindowsPlayer" "WindowsPlayer.json" "${{ steps.old.outputs.WindowsPlayer }}" "https://clientsettings.roblox.com/v2/client-version/WindowsPlayer"
+          check "WindowsStudio64" "WindowsStudio64.json" "${{ steps.old.outputs.WindowsStudio64 }}" "https://clientsettings.roblox.com/v2/client-version/WindowsStudio64"
+          check "MacPlayer" "MacPlayer.json" "${{ steps.old.outputs.MacPlayer }}" "https://clientsettings.roblox.com/v2/client-version/MacPlayer"
+          check "MacStudio" "MacStudio.json" "${{ steps.old.outputs.MacStudio }}" "https://clientsettings.roblox.com/v2/client-version/MacStudio"
+
+          if [ -z "$build_msg" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "message=$build_msg" >> $GITHUB_OUTPUT
+            echo "urls=$changed_urls" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit changes
+        if: steps.msg.outputs.changed == 'true'
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: "*.json"
+          message: ${{ steps.msg.outputs.message }}
+          default_author: github_actions
+
+      - name: Archive to Wayback Machine via SPN
+        if: steps.msg.outputs.changed == 'true'
+        run: |
+          for url in ${{ steps.msg.outputs.urls }}; do
+            echo "Archiving $url"
+
+            curl -s -X POST \
+              -H "Accept: application/json" \
+              -H "Authorization: LOW ${{ secrets.ARCHIVE_ORG_ACCESS_KEY }}:${{ secrets.ARCHIVE_ORG_SECRET_KEY }}" \
+              --data-urlencode "url=$url" \
+              https://web.archive.org/save
+          done

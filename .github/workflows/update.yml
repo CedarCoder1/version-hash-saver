@@ -45,11 +45,17 @@ jobs:
           build_msg=""
           changed_urls=""
 
+          extract_short_version () {
+            full=$1
+            echo "$full" | cut -d. -f1-2
+          }
+
           check () {
             name=$1
             file=$2
             old=$3
             url=$4
+            ota_base=$5
 
             new=$(jq -r '.version' "$file")
 
@@ -61,13 +67,19 @@ jobs:
 
               # track changed URL
               changed_urls+="$url "
+
+              # if OTA base exists, also archive OTA endpoint
+              if [ -n "$ota_base" ]; then
+                short=$(extract_short_version "$new")
+                changed_urls+="${ota_base}?version=${short} "
+              fi
             fi
           }
 
-          check "WindowsPlayer" "WindowsPlayer.json" "${{ steps.old.outputs.WindowsPlayer }}" "https://clientsettings.roblox.com/v2/client-version/WindowsPlayer"
-          check "WindowsStudio64" "WindowsStudio64.json" "${{ steps.old.outputs.WindowsStudio64 }}" "https://clientsettings.roblox.com/v2/client-version/WindowsStudio64"
-          check "MacPlayer" "MacPlayer.json" "${{ steps.old.outputs.MacPlayer }}" "https://clientsettings.roblox.com/v2/client-version/MacPlayer"
-          check "MacStudio" "MacStudio.json" "${{ steps.old.outputs.MacStudio }}" "https://clientsettings.roblox.com/v2/client-version/MacStudio"
+          check "WindowsPlayer" "WindowsPlayer.json" "${{ steps.old.outputs.WindowsPlayer }}" "https://clientsettings.roblox.com/v2/client-version/WindowsPlayer" ""
+          check "WindowsStudio64" "WindowsStudio64.json" "${{ steps.old.outputs.WindowsStudio64 }}" "https://clientsettings.roblox.com/v2/client-version/WindowsStudio64" "https://clientsettings.roblox.com/v2/ota-version/WindowsStudio64"
+          check "MacPlayer" "MacPlayer.json" "${{ steps.old.outputs.MacPlayer }}" "https://clientsettings.roblox.com/v2/client-version/MacPlayer" ""
+          check "MacStudio" "MacStudio.json" "${{ steps.old.outputs.MacStudio }}" "https://clientsettings.roblox.com/v2/client-version/MacStudio" "https://clientsettings.roblox.com/v2/ota-version/MacStudio"
 
           if [ -z "$build_msg" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT

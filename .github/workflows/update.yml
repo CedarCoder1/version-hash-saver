@@ -44,34 +44,33 @@ jobs:
         run: |
           build_msg=""
           changed_urls=""
-          timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
           extract_short_version () {
-            echo "$1" | cut -d. -f1-2
+            full=$1
+            echo "$full" | cut -d. -f1-2
           }
-
-          # Using a temporary file to avoid multi-line string issues in GITHUB_OUTPUT
-          touch temp_history.txt
 
           check () {
             name=$1
             file=$2
-            old_val=$3
+            old=$3
             url=$4
             ota_base=$5
 
-            if [ ! -f "$file" ]; then return; fi
-            new_val=$(jq -r '.version' "$file")
+            new=$(jq -r '.version' "$file")
 
-            if [ "$old_val" != "$new_val" ]; then
-              [ -n "$build_msg" ] && build_msg+=", "
-              build_msg+="$name → $new_val"
-              
-              echo "[$timestamp] $name updated: $old_val -> $new_val" >> temp_history.txt
+            if [ "$old" != "$new" ]; then
+              if [ -n "$build_msg" ]; then
+                build_msg+=", "
+              fi
+              build_msg+="$name → $new"
 
+              # track changed URL
               changed_urls+="$url "
+
+              # if OTA base exists, also archive OTA endpoint
               if [ -n "$ota_base" ]; then
-                short=$(extract_short_version "$new_val")
+                short=$(extract_short_version "$new")
                 changed_urls+="${ota_base}?version=${short} "
               fi
             fi
@@ -85,8 +84,6 @@ jobs:
           if [ -z "$build_msg" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
-            # Append new history to the real file
-            cat temp_history.txt >> history.txt
             echo "changed=true" >> $GITHUB_OUTPUT
             echo "message=$build_msg" >> $GITHUB_OUTPUT
             echo "urls=$changed_urls" >> $GITHUB_OUTPUT
@@ -96,9 +93,7 @@ jobs:
         if: steps.msg.outputs.changed == 'true'
         uses: EndBug/add-and-commit@v9
         with:
-          add: |
-            *.json
-            history.txt
+          add: "*.json"
           message: ${{ steps.msg.outputs.message }}
           default_author: github_actions
 
@@ -107,6 +102,7 @@ jobs:
         run: |
           for url in ${{ steps.msg.outputs.urls }}; do
             echo "Archiving $url"
+
             curl -s -X POST \
               -H "Accept: application/json" \
               -H "Authorization: LOW ${{ secrets.ARCHIVE_ORG_ACCESS_KEY }}:${{ secrets.ARCHIVE_ORG_SECRET_KEY }}" \

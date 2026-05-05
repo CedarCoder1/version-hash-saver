@@ -44,6 +44,8 @@ jobs:
         run: |
           build_msg=""
           changed_urls=""
+          history_entry=""
+          timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
           extract_short_version () {
             full=$1
@@ -64,6 +66,9 @@ jobs:
                 build_msg+=", "
               fi
               build_msg+="$name → $new"
+              
+              # Build the line for history.txt
+              history_entry+="[$timestamp] $name updated: $old -> $new"$'\n'
 
               # track changed URL
               changed_urls+="$url "
@@ -84,6 +89,9 @@ jobs:
           if [ -z "$build_msg" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
+            # Append changes to history.txt
+            printf "%s" "$history_entry" >> history.txt
+            
             echo "changed=true" >> $GITHUB_OUTPUT
             echo "message=$build_msg" >> $GITHUB_OUTPUT
             echo "urls=$changed_urls" >> $GITHUB_OUTPUT
@@ -93,7 +101,10 @@ jobs:
         if: steps.msg.outputs.changed == 'true'
         uses: EndBug/add-and-commit@v9
         with:
-          add: "*.json"
+          # Updated to include history.txt
+          add: |
+            *.json
+            history.txt
           message: ${{ steps.msg.outputs.message }}
           default_author: github_actions
 

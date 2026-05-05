@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Save old versions
         id: old
@@ -44,38 +44,34 @@ jobs:
         run: |
           build_msg=""
           changed_urls=""
-          history_entry=""
           timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
           extract_short_version () {
-            full=$1
-            echo "$full" | cut -d. -f1-2
+            echo "$1" | cut -d. -f1-2
           }
+
+          # Using a temporary file to avoid multi-line string issues in GITHUB_OUTPUT
+          touch temp_history.txt
 
           check () {
             name=$1
             file=$2
-            old=$3
+            old_val=$3
             url=$4
             ota_base=$5
 
-            new=$(jq -r '.version' "$file")
+            if [ ! -f "$file" ]; then return; fi
+            new_val=$(jq -r '.version' "$file")
 
-            if [ "$old" != "$new" ]; then
-              if [ -n "$build_msg" ]; then
-                build_msg+=", "
-              fi
-              build_msg+="$name → $new"
+            if [ "$old_val" != "$new_val" ]; then
+              [ -n "$build_msg" ] && build_msg+=", "
+              build_msg+="$name → $new_val"
               
-              # Build the line for history.txt
-              history_entry+="[$timestamp] $name updated: $old -> $new"$'\n'
+              echo "[$timestamp] $name updated: $old_val -> $new_val" >> temp_history.txt
 
-              # track changed URL
               changed_urls+="$url "
-
-              # if OTA base exists, also archive OTA endpoint
               if [ -n "$ota_base" ]; then
-                short=$(extract_short_version "$new")
+                short=$(extract_short_version "$new_val")
                 changed_urls+="${ota_base}?version=${short} "
               fi
             fi
@@ -89,9 +85,8 @@ jobs:
           if [ -z "$build_msg" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
-            # Append changes to history.txt
-            printf "%s" "$history_entry" >> history.txt
-            
+            # Append new history to the real file
+            cat temp_history.txt >> history.txt
             echo "changed=true" >> $GITHUB_OUTPUT
             echo "message=$build_msg" >> $GITHUB_OUTPUT
             echo "urls=$changed_urls" >> $GITHUB_OUTPUT
@@ -101,7 +96,6 @@ jobs:
         if: steps.msg.outputs.changed == 'true'
         uses: EndBug/add-and-commit@v9
         with:
-          # Updated to include history.txt
           add: |
             *.json
             history.txt
@@ -113,7 +107,6 @@ jobs:
         run: |
           for url in ${{ steps.msg.outputs.urls }}; do
             echo "Archiving $url"
-
             curl -s -X POST \
               -H "Accept: application/json" \
               -H "Authorization: LOW ${{ secrets.ARCHIVE_ORG_ACCESS_KEY }}:${{ secrets.ARCHIVE_ORG_SECRET_KEY }}" \
